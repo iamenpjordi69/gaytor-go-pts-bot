@@ -1,0 +1,12 @@
+﻿go : # go-cult-2025/internal/commands
+At line:1 char:1
++ go build ./... 2>&1 | Out-File -Encoding utf8 errors2.txt
++ ~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (# go-cult-2025/inter 
+   nal/commands:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+internal\commands\owner.go:38:6: setWinlogHandler redeclared in 
+this block
+	internal\commands\config.go:61:6: other declaration of 
+setWinlogHandler

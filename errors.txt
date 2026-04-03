@@ -1,0 +1,16 @@
+﻿go : # go-cult-2025/internal/commands
+At line:1 char:1
++ go build ./... 2>&1 | Out-File -Encoding utf8 errors.txt
++ ~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (# go-cult-2025/inter 
+   nal/commands:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+internal\commands\cults_wars.go:87:23: userCult.LeaderID 
+undefined (type models.Cult has no field or method LeaderID)
+internal\commands\cults_wars.go:209:23: userCult.LeaderID 
+undefined (type models.Cult has no field or method LeaderID)
+internal\commands\cults_wars.go:227:17: undefined: 
+database.ColWars
+internal\commands\cults_wars.go:245:11: undefined: 
+database.ColWars

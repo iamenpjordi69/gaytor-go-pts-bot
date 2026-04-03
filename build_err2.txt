@@ -1,0 +1,13 @@
+# go-cult-2025/internal/commands
+internal\commands\admin.go:64:19: undefined: strconv
+internal\commands\economy.go:8:2: "go-cult-2025/internal/database" imported and not used
+internal\commands\economy.go:11:2: "go.mongodb.org/mongo-driver/bson" imported and not used
+internal\commands\economy.go:51:2: declared and not used: ctx
+internal\commands\cults.go:13:5: "go.mongodb.org/mongo-driver/bson/primitive" imported and not used
+# go-cult-2025/internal/scraper
+internal\scraper\manager.go:223:13: cannot use []*discordgo.MessageEmbed{…} (value of type []*discordgo.MessageEmbed) as *[]*discordgo.MessageEmbed value in struct literal
+internal\scraper\manager.go:224:17: cannot use []discordgo.MessageComponent{} (value of type []discordgo.MessageComponent) as *[]discordgo.MessageComponent value in struct literal
+internal\scraper\scraper.go:4:2: "context" imported and not used
+internal\scraper\scraper.go:7:2: "log" imported and not used
+internal\scraper\scraper.go:14:2: "go-cult-2025/internal/database" imported and not used
+internal\scraper\scraper.go:15:2: "go.mongodb.org/mongo-driver/bson" imported and not used
