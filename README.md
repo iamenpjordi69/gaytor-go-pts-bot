@@ -1,6 +1,6 @@
-# 🏰 Territorial Cults Go (2025)
+# 🏰 Territorial Cults Go (2026)
 
-A high-performance, natively ported Discord bot for managing competitive **Territorial.io** gaming communities. This is the 2025 Go evolution of the original Python bot, optimized for speed, concurrency, and reliability.
+A high-performance, natively ported Discord bot for managing competitive **Territorial.io** gaming communities. This is the 2026 Go evolution of the original Python bot, optimized for speed, concurrency, and reliability.
 
 Credits Viktor's Point Bot (Python)[https://github.com/viktorexe/cults-2025]
 
