@@ -2,6 +2,8 @@
 
 A high-performance, natively ported Discord bot for managing competitive **Territorial.io** gaming communities. This is the 2025 Go evolution of the original Python bot, optimized for speed, concurrency, and reliability.
 
+Credits Viktor's Point Bot (Python)[https://github.com/viktorexe/cults-2025]
+
 ## 🚀 Key Improvements in Go Version
 
 - **Blazing Fast Scraping**: Polling interval reduced to **2 seconds** for near-instant winlog reporting.
