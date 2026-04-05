@@ -242,10 +242,12 @@ func accountLinkingHandler(s *discordgo.Session, i *discordgo.InteractionCreate)
 		usr = i.User
 	}
 
-	if !IsBotOwner(usr.ID) {
+	// Check: Bot Owner OR Admin
+	isAdmin := (i.Member.Permissions & discordgo.PermissionAdministrator) == discordgo.PermissionAdministrator
+	if !IsBotOwner(usr.ID) && !isAdmin {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{Content: "❌ You are not authorized to use this command!", Flags: discordgo.MessageFlagsEphemeral},
+			Data: &discordgo.InteractionResponseData{Content: "❌ Administrator or Bot Owner permission required!", Flags: discordgo.MessageFlagsEphemeral},
 		})
 		return
 	}

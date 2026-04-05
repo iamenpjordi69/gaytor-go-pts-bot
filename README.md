@@ -121,15 +121,14 @@ go build -o bot cmd/bot/main.go
 | `/edit_multiplier` | Tweak active server-wide event | `multiplier`, `description` |
 | `/end_multiplier` | Deactivate the current server bonus | None |
 | `/set_winlog` | Set up automated scraping channel | `channel`, `clan_name`, `remove` |
+| `/account_linking` | Link a Discord ID to T.io code | `account_name`, `user` |
 | `/bot_manager` | Set the "Bot Manager" helper role | `role` |
 | `/debug_rewards` | Check internal eligibility logic | None |
 
 ### 👑 Owner Commands (Bot Owner Only)
 | Command | Usage | Options |
 | :--- | :--- | :--- |
-| `/account_linking` | Link a Discord ID to T.io code | `account_name`, `user` |
 | `/adminpoints` | Manual scrape points from a message | `message_id` |
-| `/cult_end_war` | Forcefully terminate a specific war | `war_id` |
 
 ---
 
