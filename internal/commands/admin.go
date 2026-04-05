@@ -10,6 +10,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func init() {
@@ -55,23 +56,30 @@ func botManagerHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 
 	roleID := i.ApplicationCommandData().Options[0].RoleValue(s, i.GuildID).ID
-	roleName := i.ApplicationCommandData().Options[0].RoleValue(s, i.GuildID).Name
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	col := database.DB.Collection("bot_settings")
-	
 	guildIDInt, _ := strconv.ParseInt(i.GuildID, 10, 64)
-	col.DeleteMany(ctx, bson.M{"guild_id": guildIDInt})
 
-	col.InsertOne(ctx, bson.M{
-		"guild_id":          guildIDInt,
-		"manager_role_id":   roleID,
-		"manager_role_name": roleName,
-		"set_by":            usr.ID,
-		"set_at":            time.Now().UTC(),
-	})
+	// Use update with upsert to maintain other settings like RewardStackable
+	opts := options.Update().SetUpsert(true)
+	_, err := database.ColGuildSettings.UpdateOne(ctx,
+		bson.M{"guild_id": guildIDInt},
+		bson.M{"$set": bson.M{"manager_role_id": roleID}},
+		opts,
+	)
+
+	if err != nil {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "❌ Failed to save bot settings!",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
 
 	embed := &discordgo.MessageEmbed{
 		Title:       "✅ Bot Manager Role Set",

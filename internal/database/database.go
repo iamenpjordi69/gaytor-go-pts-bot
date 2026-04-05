@@ -26,6 +26,7 @@ var (
 	ColRewardRoles   *mongo.Collection
 	ColWinlogSetting *mongo.Collection
 	ColAccountLinks  *mongo.Collection
+	ColGuildSettings *mongo.Collection
 )
 
 // Connect initializes the MongoDB setup.
@@ -66,6 +67,7 @@ func Connect() error {
 	ColRewardRoles = DB.Collection("reward_roles")
 	ColWinlogSetting = DB.Collection("winlog_settings")
 	ColAccountLinks = DB.Collection("account_links")
+	ColGuildSettings = DB.Collection("guild_settings")
 
 	log.Println("Successfully connected to MongoDB")
 	return nil

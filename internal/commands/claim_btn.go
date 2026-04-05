@@ -114,7 +114,11 @@ func claimWinlogHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			Flags:  discordgo.MessageFlagsEphemeral,
 		},
 	})
-	
+
+	// Trigger Reward Manager in background (own fresh context)
+	go CheckAndAssignRewards(s, guildID, userIDInt, "points")
+	go CheckAndAssignRewards(s, guildID, userIDInt, "wins")
+
 	go updateOriginalMessageEmbed(s, i.Message, msgID)
 }
 

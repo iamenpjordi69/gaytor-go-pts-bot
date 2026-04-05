@@ -217,7 +217,7 @@ func stringPtr(val string) *string {
 	return &val
 }
 
-// addHandler handles /add which natively replaces point adding and win adding logic
+// addHandler handles /add — adds points and/or wins to a user's account
 func addHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	usr := i.Member.User
 	if usr == nil {
@@ -226,26 +226,60 @@ func addHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	targetUser := usr
 	pointsToAdd := 0.0
-	winsToAdd := 1.0
+	winsToAdd := 0.0           // default 0 — only added if explicitly provided
+	winsExplicit := false      // track if user actually passed the wins option
 
 	for _, opt := range i.ApplicationCommandData().Options {
-		if opt.Name == "user" {
+		switch opt.Name {
+		case "user":
 			targetUser = opt.UserValue(s)
-		} else if opt.Name == "points" {
+		case "points":
 			pointsToAdd = opt.FloatValue()
-		} else if opt.Name == "wins" {
+		case "wins":
 			winsToAdd = float64(opt.IntValue())
+			winsExplicit = true
 		}
 	}
 
-	// Permission check if trying to add to someone else or doing massive amounts
+	// Validate points
+	if pointsToAdd <= 0 {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "❌ Points must be a positive number.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	// Only admins/owner can add to OTHER users — anyone can add to themselves
 	if targetUser.ID != usr.ID {
 		canManage := (i.Member.Permissions & discordgo.PermissionAdministrator) == discordgo.PermissionAdministrator
 		if !canManage && !IsBotOwner(usr.ID) {
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
-					Content: "❌ You need Administrator permissions to add points to another user!",
+					Content: "❌ Administrator permissions required to add points to another user!",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
+			return
+		}
+	}
+
+	// Only admins can explicitly set wins — wins are earned, not self-assigned
+	if winsExplicit {
+		canManage := (i.Member.Permissions & discordgo.PermissionAdministrator) == discordgo.PermissionAdministrator
+		if !canManage && !IsBotOwner(usr.ID) {
+			// Silently ignore the wins amount for non-admins
+			winsExplicit = false
+			winsToAdd = 0
+		} else if winsToAdd < 0 {
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "❌ Wins cannot be negative.",
 					Flags:   discordgo.MessageFlagsEphemeral,
 				},
 			})
@@ -259,7 +293,7 @@ func addHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Multiplier logic
+	// Multiplier
 	multiplier := 1.0
 	var mult models.Multiplier
 	if err := database.ColMultipliers.FindOne(ctx, bson.M{"guild_id": guildID, "active": true}).Decode(&mult); err == nil {
@@ -268,61 +302,74 @@ func addHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	finalPoints := pointsToAdd * multiplier
 
-	// Find cult for tracking
+	// Cult tracking
 	var userCult models.Cult
 	database.ColCults.FindOne(ctx, bson.M{"guild_id": guildID, "members": targetID, "active": true}).Decode(&userCult)
 	cultIDStr := ""
-	if userCult.ID.Hex() != "000000000000000000000000" {
+	if !userCult.ID.IsZero() {
 		cultIDStr = userCult.ID.Hex()
 	}
 
 	guildName := ""
-	guild, err := s.Guild(i.GuildID)
-	if err == nil {
+	if guild, err := s.Guild(i.GuildID); err == nil {
 		guildName = guild.Name
 	}
 
-	// Save transactions
-	if finalPoints > 0 {
-		database.ColPoints.InsertOne(ctx, models.Transaction{
-			UserID:         targetID,
-			UserName:       targetUser.Username,
-			GuildID:        guildID,
-			GuildName:      guildName,
-			Amount:         finalPoints,
-			BaseAmount:     pointsToAdd,
-			MultiplierUsed: multiplier,
-			CultID:         &cultIDStr,
-			CultName:       &userCult.CultName,
-			Type:           "add",
-			Timestamp:      time.Now().UTC(),
-		})
-	}
-	
-	if winsToAdd > 0 {
+	now := time.Now().UTC()
+
+	// Insert points transaction
+	database.ColPoints.InsertOne(ctx, models.Transaction{
+		UserID:         targetID,
+		UserName:       targetUser.Username,
+		GuildID:        guildID,
+		GuildName:      guildName,
+		Amount:         finalPoints,
+		BaseAmount:     pointsToAdd,
+		MultiplierUsed: multiplier,
+		CultID:         &cultIDStr,
+		CultName:       &userCult.CultName,
+		Type:           "add",
+		Timestamp:      now,
+	})
+
+	// Insert wins transaction only if explicitly provided
+	if winsExplicit && winsToAdd > 0 {
 		database.ColWins.InsertOne(ctx, models.Transaction{
-			UserID:         targetID,
-			UserName:       targetUser.Username,
-			GuildID:        guildID,
-			GuildName:      guildName,
-			Amount:         winsToAdd,
-			CultID:         &cultIDStr,
-			CultName:       &userCult.CultName,
-			Type:           "add",
-			Timestamp:      time.Now().UTC(),
+			UserID:    targetID,
+			UserName:  targetUser.Username,
+			GuildID:   guildID,
+			GuildName: guildName,
+			Amount:    winsToAdd,
+			CultID:    &cultIDStr,
+			CultName:  &userCult.CultName,
+			Type:      "add",
+			Timestamp: now,
 		})
 	}
 
-	userPoints := fetchTotal(ctx, targetID, guildID, "points")
-	userWins := fetchTotal(ctx, targetID, guildID, "wins")
+	// Fetch updated totals with a fresh context so the cancelled ctx doesn't cause a stale read
+	totalCtx, totalCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer totalCancel()
+	newPoints := fetchTotal(totalCtx, targetID, guildID, "points")
+	newWins := fetchTotal(totalCtx, targetID, guildID, "wins")
+
+	// Build response message
+	addedDesc := fmt.Sprintf("**+%.1f points**", finalPoints)
+	if multiplier > 1 {
+		addedDesc += fmt.Sprintf(" *(base %.1f × %.1fx multiplier)*", pointsToAdd, multiplier)
+	}
+	if winsExplicit && winsToAdd > 0 {
+		addedDesc += fmt.Sprintf(" and **+%.0f wins**", winsToAdd)
+	}
 
 	embed := &discordgo.MessageEmbed{
 		Color: 0x00ff00,
-		Title: fmt.Sprintf("✅ Points Added to %s", targetUser.Username),
-		Description: fmt.Sprintf("%.1f points and %.0f wins added to balance.\n**New Points:** %.1f\n**New Wins:** %.0f", finalPoints, winsToAdd, userPoints, userWins),
-	}
-	if multiplier > 1 {
-		embed.Description += fmt.Sprintf("\n*Multiplier:* %vx applied", multiplier)
+		Title: fmt.Sprintf("✅ Points Added — %s", targetUser.Username),
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "Added", Value: addedDesc, Inline: false},
+			{Name: "New Points", Value: fmt.Sprintf("%.1f", newPoints), Inline: true},
+			{Name: "New Wins", Value: fmt.Sprintf("%.0f", newWins), Inline: true},
+		},
 	}
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -331,9 +378,15 @@ func addHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			Embeds: []*discordgo.MessageEmbed{embed},
 		},
 	})
+
+	// Reward check in background
+	go CheckAndAssignRewards(s, guildID, targetID, "points")
+	if winsExplicit && winsToAdd > 0 {
+		go CheckAndAssignRewards(s, guildID, targetID, "wins")
+	}
 }
 
-// removeHandler consolidates point subtraction
+// removeHandler handles /remove — subtracts points and/or wins from a user's account
 func removeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	usr := i.Member.User
 	if usr == nil {
@@ -345,39 +398,41 @@ func removeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	winsToRemove := 0.0
 
 	for _, opt := range i.ApplicationCommandData().Options {
-		if opt.Name == "user" {
+		switch opt.Name {
+		case "user":
 			targetUser = opt.UserValue(s)
-		} else if opt.Name == "points" {
+		case "points":
 			pointsToRemove = opt.FloatValue()
-		} else if opt.Name == "wins" {
+		case "wins":
 			winsToRemove = float64(opt.IntValue())
 		}
 	}
 
-	// Only admin or owner can modify others
+	// Must provide at least one of points or wins
+	if pointsToRemove <= 0 && winsToRemove <= 0 {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "❌ Please provide a positive number of points and/or wins to remove.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	// Only admin/owner can modify other users
 	if targetUser.ID != usr.ID {
 		canManage := (i.Member.Permissions & discordgo.PermissionAdministrator) == discordgo.PermissionAdministrator
 		if !canManage && !IsBotOwner(usr.ID) {
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
-					Content: "❌ Administrator permissions required!",
+					Content: "❌ Administrator permissions required to remove from another user!",
 					Flags:   discordgo.MessageFlagsEphemeral,
 				},
 			})
 			return
 		}
-	}
-
-	if pointsToRemove <= 0 && winsToRemove <= 0 {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "❌ Please provide a positive number of points or wins to remove.",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
-		return
 	}
 
 	guildID, _ := strconv.ParseInt(i.GuildID, 10, 64)
@@ -386,43 +441,67 @@ func removeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	guildName := "Server"
-	guild, err := s.Guild(i.GuildID)
-	if err == nil {
+	guildName := ""
+	if guild, err := s.Guild(i.GuildID); err == nil {
 		guildName = guild.Name
 	}
 
+	now := time.Now().UTC()
+
 	if pointsToRemove > 0 {
 		database.ColPoints.InsertOne(ctx, models.Transaction{
-			UserID:         targetID,
-			UserName:       targetUser.Username,
-			GuildID:        guildID,
-			GuildName:      guildName,
-			Amount:         -pointsToRemove, // negative logic
-			Type:           "remove",
-			Timestamp:      time.Now().UTC(),
+			UserID:    targetID,
+			UserName:  targetUser.Username,
+			GuildID:   guildID,
+			GuildName: guildName,
+			Amount:    -pointsToRemove, // negative to subtract from aggregate sum
+			Type:      "remove",
+			Timestamp: now,
 		})
 	}
-	
+
 	if winsToRemove > 0 {
 		database.ColWins.InsertOne(ctx, models.Transaction{
-			UserID:         targetID,
-			UserName:       targetUser.Username,
-			GuildID:        guildID,
-			GuildName:      guildName,
-			Amount:         -winsToRemove,
-			Type:           "remove",
-			Timestamp:      time.Now().UTC(),
+			UserID:    targetID,
+			UserName:  targetUser.Username,
+			GuildID:   guildID,
+			GuildName: guildName,
+			Amount:    -winsToRemove,
+			Type:      "remove",
+			Timestamp: now,
 		})
 	}
 
-	userPoints := fetchTotal(ctx, targetID, guildID, "points")
-	userWins := fetchTotal(ctx, targetID, guildID, "wins")
+	// Fresh context for reading totals
+	totalCtx, totalCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer totalCancel()
+	newPoints := fetchTotal(totalCtx, targetID, guildID, "points")
+	newWins := fetchTotal(totalCtx, targetID, guildID, "wins")
+
+	// Build contextual removed line — only mention what was actually removed
+	var removedParts []string
+	if pointsToRemove > 0 {
+		removedParts = append(removedParts, fmt.Sprintf("**-%.1f points**", pointsToRemove))
+	}
+	if winsToRemove > 0 {
+		removedParts = append(removedParts, fmt.Sprintf("**-%.0f wins**", winsToRemove))
+	}
+	removedStr := ""
+	for idx, p := range removedParts {
+		if idx > 0 {
+			removedStr += " and "
+		}
+		removedStr += p
+	}
 
 	embed := &discordgo.MessageEmbed{
-		Color: 0xff0000,
-		Title: fmt.Sprintf("➖ Subtracted from %s", targetUser.Username),
-		Description: fmt.Sprintf("%.1f points and %.0f wins were removed.\n**New Points:** %.1f\n**New Wins:** %.0f", pointsToRemove, winsToRemove, userPoints, userWins),
+		Color: 0xff4444,
+		Title: fmt.Sprintf("➖ Points Removed — %s", targetUser.Username),
+		Fields: []*discordgo.MessageEmbedField{
+			{Name: "Removed", Value: removedStr, Inline: false},
+			{Name: "New Points", Value: fmt.Sprintf("%.1f", newPoints), Inline: true},
+			{Name: "New Wins", Value: fmt.Sprintf("%.0f", newWins), Inline: true},
+		},
 	}
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -431,4 +510,9 @@ func removeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			Embeds: []*discordgo.MessageEmbed{embed},
 		},
 	})
+
+	// Re-evaluate rewards in background
+	go CheckAndAssignRewards(s, guildID, targetID, "points")
+	go CheckAndAssignRewards(s, guildID, targetID, "wins")
 }
+

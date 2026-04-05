@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"sort"
 	"strconv"
 	"time"
 
@@ -108,27 +107,13 @@ func generateGraph(ctx context.Context, uID, gID int64, colType, title string) (
 		return nil, fmt.Errorf("no data found")
 	}
 
-	dailyTotals := make(map[time.Time]float64)
-	for _, tx := range txs {
-		d := time.Date(tx.Timestamp.Year(), tx.Timestamp.Month(), tx.Timestamp.Day(), 0, 0, 0, 0, time.UTC)
-		dailyTotals[d] += tx.Amount
-	}
-
-	var dates []time.Time
-	for k := range dailyTotals {
-		dates = append(dates, k)
-	}
-	sort.Slice(dates, func(i, j int) bool {
-		return dates[i].Before(dates[j])
-	})
-
 	var xValues []time.Time
 	var yValues []float64
 	cumulative := 0.0
 
-	for _, d := range dates {
-		cumulative += dailyTotals[d]
-		xValues = append(xValues, d)
+	for _, tx := range txs {
+		cumulative += tx.Amount
+		xValues = append(xValues, tx.Timestamp)
 		yValues = append(yValues, cumulative)
 	}
 
@@ -136,25 +121,47 @@ func generateGraph(ctx context.Context, uID, gID int64, colType, title string) (
 		return nil, fmt.Errorf("no points collected yet")
 	}
 
-	// Fix go-chart rendering crash for single data points by padding with a prior day of 0
+	// Fix go-chart rendering crash for single data points by padding with a prior point of 0
 	if len(xValues) == 1 {
 		xValues = append([]time.Time{xValues[0].AddDate(0, 0, -1)}, xValues...)
 		yValues = append([]float64{0}, yValues...)
 	}
 
 	graph := chart.Chart{
-		Title: title,
+		Width:  512,
+		Height: 269, // explicitly in the middle of 256 and 282
+		Background: chart.Style{
+			Padding: chart.Box{
+				Top:    25, // Halved from 50
+				Bottom: 8, // Halved from 20
+				Left:   8, // Halved from 20
+				Right:  8, // Halved from 20
+			},
+		},
+		Title:  title,
 		XAxis: chart.XAxis{
 			Name:           "Date",
 			ValueFormatter: chart.TimeValueFormatterWithFormat("2006-01-02"),
+			GridMajorStyle: chart.Style{
+				StrokeColor: chart.ColorLightGray,
+				StrokeWidth: 1.0,
+			},
 		},
 		YAxis: chart.YAxis{
 			Name:  "Amount",
+			GridMajorStyle: chart.Style{
+				StrokeColor: chart.ColorLightGray,
+				StrokeWidth: 1.0,
+			},
 		},
 		Series: []chart.Series{
 			chart.TimeSeries{
 				XValues: xValues,
 				YValues: yValues,
+				Style: chart.Style{
+					StrokeWidth: 2.0,
+					DotWidth:    3.0,
+				},
 			},
 		},
 	}
@@ -236,8 +243,6 @@ func profileHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		},
 	}
 
-	graphData, err := generateGraph(ctx, targetID, guildID, "points", targetUser.Username+"'s Points")
-
 	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
@@ -257,27 +262,10 @@ func profileHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		},
 	}
 
-	if err == nil {
-		embed.Image = &discordgo.MessageEmbedImage{
-			URL: "attachment://points_graph.png",
-		}
-		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Embeds:     &[]*discordgo.MessageEmbed{embed},
-			Components: &components,
-			Files: []*discordgo.File{
-				{
-					Name:        "points_graph.png",
-					ContentType: "image/png",
-					Reader:      bytes.NewReader(graphData),
-				},
-			},
-		})
-	} else {
-		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Embeds:     &[]*discordgo.MessageEmbed{embed},
-			Components: &components,
-		})
-	}
+	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Embeds:     &[]*discordgo.MessageEmbed{embed},
+		Components: &components,
+	})
 }
 
 func profileGraphComponentHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -302,12 +290,10 @@ func profileGraphComponentHandler(s *discordgo.Session, i *discordgo.Interaction
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Need a username for the graph title. We'll use "User" since we can't easily fetch their username here.
-	var tx models.Transaction
-	database.ColPoints.FindOne(ctx, bson.M{"user_id": targetID}).Decode(&tx)
+	// Fetch the actual username from Discord instead of relying on the database caching IDs
 	title := "User"
-	if tx.UserName != "" {
-		title = tx.UserName
+	if userObj, err := s.User(strconv.FormatInt(targetID, 10)); err == nil && userObj != nil {
+		title = userObj.Username
 	}
 	title += "'s " + realType
 
@@ -324,32 +310,36 @@ func profileGraphComponentHandler(s *discordgo.Session, i *discordgo.Interaction
 		return
 	}
 
-	fileName := realType + "_graph.png"
-	color := 0x00ff00
-	if realType == "wins" {
-		color = 0xffa500
-	}
-
-	embed := &discordgo.MessageEmbed{
-		Title: title + " Graph",
-		Color: color,
-		Image: &discordgo.MessageEmbedImage{
-			URL: "attachment://" + fileName,
-		},
-	}
-
-	// Important step: InteractionResponseUpdateMessage
+	// Defer the message update so we can edit the webhook and clear attachments
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseUpdateMessage,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{embed},
-			Files: []*discordgo.File{
-				{
-					Name:        fileName,
-					ContentType: "image/png",
-					Reader:      bytes.NewReader(graphData),
-				},
+		Type: discordgo.InteractionResponseDeferredMessageUpdate,
+	})
+
+	fileName := realType + "_graph.png"
+	
+	// Preserve the original embed but update its image
+	var embed *discordgo.MessageEmbed
+	if len(i.Message.Embeds) > 0 {
+		embed = i.Message.Embeds[0]
+	} else {
+		embed = &discordgo.MessageEmbed{}
+	}
+	
+	embed.Image = &discordgo.MessageEmbedImage{
+		URL: "attachment://" + fileName,
+	}
+
+	// Edit the webhook to replace the file and clear old attachments
+	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Embeds:     &[]*discordgo.MessageEmbed{embed},
+		Components: &i.Message.Components,
+		Files: []*discordgo.File{
+			{
+				Name:        fileName,
+				ContentType: "image/png",
+				Reader:      bytes.NewReader(graphData),
 			},
 		},
+		Attachments: &[]*discordgo.MessageAttachment{}, // This clears previous attachments (avoiding the 2 graphs issue)
 	})
 }

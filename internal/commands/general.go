@@ -21,15 +21,17 @@ func init() {
 
 func helpHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	embed := &discordgo.MessageEmbed{
-		Title:       "Territorial.io Cults Bot - Help",
-		Description: "A comprehensive rewrite in Go for matching Territorial.io win logs, tracking cults, and offering a points/wins economy.",
+		Title:       "Territorial.io Cults Bot — Help",
+		Description: "A comprehensive Go-powered bot for tracking Territorial.io cults, points, wins and milestone rewards.",
 		Color:       0x00ff00,
 		Fields: []*discordgo.MessageEmbedField{
-			{Name: "General Commands", Value: "`/help`, `/invite`", Inline: false},
-			{Name: "Admin Commands", Value: "`/bot_manager`", Inline: false},
-			{Name: "Owner Commands", Value: "`/set_winlog`, `/adminpoints`, `/adminwins`, `/account_linking`", Inline: false},
-			{Name: "Reward Roles", Value: "`/rewardrole`, `/listrewards`, `/deletereward`, `/editrewardrole`, `/force_refresh_rewards`", Inline: false},
-			{Name: "Cults & Economy", Value: "`/cult_create`, `/cult_info`, `/cult_stats`, `/profile`, `/leaderboard`, among others", Inline: false},
+			{Name: "📌 General", Value: "`/help`, `/invite`", Inline: false},
+			{Name: "⚙️ Admin / Config", Value: "`/bot_manager`, `/set_winlog`, `/account_linking`", Inline: false},
+			{Name: "👑 Owner Commands", Value: "`/adminpoints`", Inline: false},
+			{Name: "📊 Economy", Value: "`/add`, `/remove`, `/profile`, `/leaderboard`", Inline: false},
+			{Name: "🎖️ Reward Roles", Value: "`/rewardrole`, `/listrewards`, `/rolelist`, `/deletereward`, `/editrewardrole`, `/set_reward_stackable`, `/force_refresh_rewards`, `/debug_rewards`, `/cleanup_roles`", Inline: false},
+			{Name: "✖️ Multipliers", Value: "`/set_multiplier`, `/end_multiplier`, `/edit_multiplier`, `/multiplier_info`", Inline: false},
+			{Name: "⚔️ Cults", Value: "`/cult_create`, `/cult_info`, `/cult_list`, `/join_cult`, `/promote_member`, `/cult_war`, `/end_war`, `/cult_leaderboard`", Inline: false},
 		},
 	}
 

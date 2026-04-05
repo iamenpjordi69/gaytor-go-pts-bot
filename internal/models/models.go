@@ -75,10 +75,13 @@ type CultWar struct {
 
 // Multiplier represents a server-wide points multiplier
 type Multiplier struct {
-	ID         primitive.ObjectID `bson:"_id,omitempty"`
-	GuildID    int64              `bson:"guild_id"`
-	Multiplier float64            `bson:"multiplier"`
-	Active     bool               `bson:"active"`
+	ID          primitive.ObjectID `bson:"_id,omitempty"`
+	GuildID     int64              `bson:"guild_id"`
+	Multiplier  float64            `bson:"multiplier"`
+	Description string             `bson:"description,omitempty"`
+	Active      bool               `bson:"active"`
+	SetAt       time.Time          `bson:"set_at,omitempty"`
+	EditedAt    time.Time          `bson:"edited_at,omitempty"`
 }
 
 // RewardRole represents a role granted at a certain milestone
@@ -107,4 +110,12 @@ type AccountLink struct {
 	GuildID     int64              `bson:"guild_id"`
 	UserID      int64              `bson:"user_id"`
 	AccountName string             `bson:"account_name"`
+}
+
+// GuildSettings represents guild-wide configurations
+type GuildSettings struct {
+	ID              primitive.ObjectID `bson:"_id,omitempty"`
+	GuildID         int64              `bson:"guild_id"`
+	ManagerRoleID   string             `bson:"manager_role_id,omitempty"`
+	RewardStackable bool               `bson:"reward_stackable"`
 }

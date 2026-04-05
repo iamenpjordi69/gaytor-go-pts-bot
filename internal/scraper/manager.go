@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"go-cult-2025/internal/commands"
 	"go-cult-2025/internal/database"
 	"go-cult-2025/internal/models"
 
@@ -23,27 +24,39 @@ func StartMonitoring(s *discordgo.Session) {
 
 	// Winlog ticker
 	go func() {
-		ticker := time.NewTicker(3 * time.Second)
+		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
-			wl, err := ScrapeMatchLogs()
-			if err != nil {
+			wls, err := ScrapeMatchLogs()
+			if err != nil || len(wls) == 0 {
 				continue // Likely no new match or parse error, silent continue
 			}
 
-			if wl.Time == lastWinlogTime {
-				continue
-			}
 			if lastWinlogTime == "" {
 				// Initialize the first run so we don't retro-process old entries
-				lastWinlogTime = wl.Time
+				lastWinlogTime = wls[0].Time
 				continue
 			}
 
-			log.Printf("Detected new winlog from territorial.io at %s", wl.Time)
-			lastWinlogTime = wl.Time
+			// We get newest to oldest. We want to process oldest first (to keep chronological order)
+			var newLogs []*WinLog
+			for _, wl := range wls {
+				if wl.Time == lastWinlogTime {
+					break
+				}
+				newLogs = append(newLogs, wl)
+			}
 
-			processWinLogForGuilds(context.Background(), s, wl)
+			// Process newLogs in reverse order (oldest first)
+			for i := len(newLogs) - 1; i >= 0; i-- {
+				wl := newLogs[i]
+				log.Printf("Detected new winlog from territorial.io at %s", wl.Time)
+				processWinLogForGuilds(context.Background(), s, wl)
+			}
+
+			if len(newLogs) > 0 {
+				lastWinlogTime = newLogs[0].Time // newest
+			}
 		}
 	}()
 
@@ -148,6 +161,10 @@ func processGuildAutoCredits(ctx context.Context, s *discordgo.Session, wl *WinL
 						Color:       0x00ff00,
 					})
 				}
+
+				// Trigger Reward Manager
+				commands.CheckAndAssignRewards(s, setting.GuildID, linkedUser.UserID, "points")
+				commands.CheckAndAssignRewards(s, setting.GuildID, linkedUser.UserID, "wins")
 			}
 		}
 	}

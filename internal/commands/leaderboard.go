@@ -27,22 +27,12 @@ func init() {
 				},
 			},
 		},
-		&discordgo.ApplicationCommand{
-			Name:        "leaderboard_week",
-			Description: "Show server leaderboard for last 7 days",
-		},
 	)
 
 	CommandHandlers["leaderboard"] = leaderboardHandler
-	CommandHandlers["leaderboard_week"] = leaderboardWeekHandler
 
 	// Handle component clicks for leaderboard
 	ComponentHandlers["leaderboard_"] = leaderboardComponentHandler
-}
-
-// Emulate a week lookup
-func leaderboardWeekHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	sendLeaderboard(s, i, 7)
 }
 
 func leaderboardHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -59,7 +49,7 @@ func sendLeaderboard(s *discordgo.Session, i *discordgo.InteractionCreate, days 
 	page := 0
 	mode := "points"
 
-	embed, components := generateLeaderboardPayload(guildID, i.GuildID, days, page, mode)
+	embed, components := generateLeaderboardPayload(guildID, days, page, mode)
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -70,7 +60,7 @@ func sendLeaderboard(s *discordgo.Session, i *discordgo.InteractionCreate, days 
 	})
 }
 
-func generateLeaderboardPayload(guildIDInt int64, guildIDStr string, days int, page int, mode string) (*discordgo.MessageEmbed, []discordgo.MessageComponent) {
+func generateLeaderboardPayload(guildIDInt int64, days int, page int, mode string) (*discordgo.MessageEmbed, []discordgo.MessageComponent) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -187,7 +177,7 @@ func leaderboardComponentHandler(s *discordgo.Session, i *discordgo.InteractionC
 	page, _ := strconv.Atoi(parts[3])
 	mode := parts[4]
 
-	embed, components := generateLeaderboardPayload(guildIDInt, i.GuildID, days, page, mode)
+	embed, components := generateLeaderboardPayload(guildIDInt, days, page, mode)
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,

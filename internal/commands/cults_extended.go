@@ -3,6 +3,8 @@ package commands
 import (
 	"context"
 	"fmt"
+	"log"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -11,8 +13,9 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"go.mongodb.org/mongo-driver/bson"
-    "go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
 
 func init() {
 	SlashCommands = append(SlashCommands, 
@@ -156,7 +159,7 @@ func joinCultHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	var target models.Cult
 	// Case-insensitive lookup (requires exact matching or regex, for ease we do pure regex but Go string matching is strict)
-	err = database.ColCults.FindOne(ctx, bson.M{"guild_id": guildID, "cult_name": bson.M{"$regex": "(i?)^" + cultName + "$"}, "active": true}).Decode(&target)
+	err = database.ColCults.FindOne(ctx, bson.M{"guild_id": guildID, "cult_name": bson.M{"$regex": "(?i)^" + regexp.QuoteMeta(cultName) + "$"}, "active": true}).Decode(&target)
 	if err != nil {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -185,7 +188,9 @@ func joinCultHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// Try to assign the cult role
 	if target.RoleID != 0 {
 		roleIDStr := strconv.FormatInt(target.RoleID, 10)
-		s.GuildMemberRoleAdd(i.GuildID, usr.ID, roleIDStr)
+		if err := s.GuildMemberRoleAdd(i.GuildID, usr.ID, roleIDStr); err != nil {
+			log.Printf("[JoinCult] Failed to assign cult role %s to user %s: %v", roleIDStr, usr.ID, err)
+		}
 	}
 
 	embed := &discordgo.MessageEmbed{
@@ -210,7 +215,7 @@ func cultInfoHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	defer cancel()
 
 	var target models.Cult
-	err := database.ColCults.FindOne(ctx, bson.M{"guild_id": guildID, "cult_name": bson.M{"$regex": "(i?)^" + cultName + "$"}, "active": true}).Decode(&target)
+	err := database.ColCults.FindOne(ctx, bson.M{"guild_id": guildID, "cult_name": bson.M{"$regex": "(?i)^" + regexp.QuoteMeta(cultName) + "$"}, "active": true}).Decode(&target)
 	if err != nil {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,

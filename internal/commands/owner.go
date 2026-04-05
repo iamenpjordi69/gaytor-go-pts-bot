@@ -21,7 +21,7 @@ func init() {
 	SlashCommands = append(SlashCommands, 
 		&discordgo.ApplicationCommand{
 			Name:        "set_winlog",
-			Description: "Configure win log settings (Owner/Manager only). Leave blank to remove settings.",
+			Description: "View, set, update or remove win log config (Admin only). No args = view current.",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionChannel,
@@ -33,6 +33,12 @@ func init() {
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "clan_name",
 					Description: "Exact clan tag to filter (e.g. OG)",
+					Required:    false,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionBoolean,
+					Name:        "remove",
+					Description: "Set to true to remove the winlog config (points are kept)",
 					Required:    false,
 				},
 			},
@@ -80,11 +86,13 @@ func setWinlogHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		usr = i.User
 	}
 
-	if !IsBotOwner(usr.ID) { // You could expand this to check managers
+	// Check: Bot Owner OR Admin
+	isAdmin := (i.Member.Permissions & discordgo.PermissionAdministrator) == discordgo.PermissionAdministrator
+	if !IsBotOwner(usr.ID) && !isAdmin {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "❌ Bot Owner permission required!",
+				Content: "❌ Administrator or Bot Owner permission required!",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
@@ -97,53 +105,100 @@ func setWinlogHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	opts := i.ApplicationCommandData().Options
 
+	// No args → show current config
 	if len(opts) == 0 {
-		// Remove setting
-		_, err := database.ColWinlogSetting.DeleteMany(ctx, bson.M{"guild_id": guildID})
-		msg := "✅ Win log tracking has been removed for this server."
+		var setting struct {
+			ChannelID int64  `bson:"channel_id"`
+			ClanName  string `bson:"clan_name"`
+			Active    bool   `bson:"active"`
+		}
+		err := database.ColWinlogSetting.FindOne(ctx, bson.M{"guild_id": guildID}).Decode(&setting)
 		if err != nil {
-			msg = "❌ Failed to remove win log settings."
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "ℹ️ No winlog is configured for this server.\n\nUse `/set_winlog channel:#ch clan_name:TAG` to set one up.",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
+			return
+		}
+		embed := &discordgo.MessageEmbed{
+			Title: "📋 Current Winlog Config",
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Clan Tag", Value: fmt.Sprintf("`[%s]`", setting.ClanName), Inline: true},
+				{Name: "Channel", Value: fmt.Sprintf("<#%d>", setting.ChannelID), Inline: true},
+			},
+			Description: "To update: `/set_winlog channel:#ch clan_name:TAG`\nTo remove: `/set_winlog remove:yes`",
+			Color:        0x00aaff,
 		}
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: msg,
+				Embeds: []*discordgo.MessageEmbed{embed},
+				Flags:  discordgo.MessageFlagsEphemeral,
 			},
 		})
 		return
 	}
 
-	if len(opts) < 2 {
+	// Parse options
+	var channelIDStr, clanName string
+	doRemove := false
+
+	for _, opt := range opts {
+		switch opt.Name {
+		case "channel":
+			channelIDStr = opt.ChannelValue(s).ID
+		case "clan_name":
+			clanName = opt.StringValue()
+		case "remove":
+			doRemove = opt.BoolValue()
+		}
+	}
+
+	// Explicit remove
+	if doRemove {
+		_, err := database.ColWinlogSetting.DeleteMany(ctx, bson.M{"guild_id": guildID})
+		msg := "🗑️ Winlog config removed. **All existing points are preserved.**"
+		if err != nil {
+			msg = "❌ Failed to remove winlog settings."
+		}
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{Content: msg},
+		})
+		return
+	}
+
+	// Must have at least one of channel or clan_name to update
+	if channelIDStr == "" && clanName == "" {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "❌ You must provide both a **channel** and a **clan_name** to set up tracking, or provide NO options to remove it.",
+				Content: "❌ Provide at least `channel` or `clan_name` to update, or `remove:yes` to delete the config.",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
 		return
 	}
 
-	var channelIDStr, clanName string
-	for _, opt := range opts {
-		if opt.Name == "channel" {
-			channelIDStr = opt.ChannelValue(s).ID
-		} else if opt.Name == "clan_name" {
-			clanName = opt.StringValue()
-		}
+	// Build $set fields — only update what was provided (partial update safe)
+	setFields := bson.M{"active": true}
+	if channelIDStr != "" {
+		channelID, _ := strconv.ParseInt(channelIDStr, 10, 64)
+		setFields["channel_id"] = channelID
+	}
+	if clanName != "" {
+		setFields["clan_name"] = clanName
 	}
 
-	channelID, _ := strconv.ParseInt(channelIDStr, 10, 64)
-
-	// Delete any existing setting for this guild to ensure clean replacement
-	database.ColWinlogSetting.DeleteMany(ctx, bson.M{"guild_id": guildID})
-
-	_, err := database.ColWinlogSetting.InsertOne(ctx, bson.M{
-		"guild_id":   guildID,
-		"channel_id": channelID,
-		"clan_name":  clanName,
-		"active":     true,
-	})
+	_, err := database.ColWinlogSetting.UpdateOne(
+		ctx,
+		bson.M{"guild_id": guildID},
+		bson.M{"$set": setFields},
+		options.Update().SetUpsert(true),
+	)
 
 	if err != nil {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -156,9 +211,19 @@ func setWinlogHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
+	// Build confirmation showing effective values
+	descParts := ""
+	if channelIDStr != "" {
+		descParts += fmt.Sprintf("**Channel:** <#%s>\n", channelIDStr)
+	}
+	if clanName != "" {
+		descParts += fmt.Sprintf("**Clan Tag:** `[%s]`\n", clanName)
+	}
+	descParts += "\n*Unchanged fields (if any) kept from previous config.*\n*Existing points are NOT affected by this change.*"
+
 	embed := &discordgo.MessageEmbed{
-		Title:       "✅ Win Log Configured",
-		Description: fmt.Sprintf("Win logs for clan `[%s]` will be sent to <#%s>", clanName, channelIDStr),
+		Title:       "✅ Win Log Updated",
+		Description: descParts,
 		Color:       0x00ff00,
 	}
 
@@ -169,6 +234,7 @@ func setWinlogHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		},
 	})
 }
+
 
 func accountLinkingHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	usr := i.Member.User
@@ -327,14 +393,24 @@ func adminpointsHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	generalPointsRegex := regexp.MustCompile(`<@!?(\d+)>\s*•\s*([\d.,]+)`)
 
-	// Load members to cache (very rough caching, discordgo doesn't auto-cache 1000s deeply instantly)
+	// Load all members to cache to support referencing users by username in servers >1000 members
 	membersCache := make(map[string]*discordgo.Member)
-	mems, _ := s.GuildMembers(i.GuildID, "", 1000)
-	for _, m := range mems {
-		membersCache[strings.ToLower(m.User.Username)] = m
-		if m.Nick != "" {
-			membersCache[strings.ToLower(m.Nick)] = m
+	var after string
+	for {
+		mems, err := s.GuildMembers(i.GuildID, after, 1000)
+		if err != nil || len(mems) == 0 {
+			break
 		}
+		for _, m := range mems {
+			membersCache[strings.ToLower(m.User.Username)] = m
+			if m.Nick != "" {
+				membersCache[strings.ToLower(m.Nick)] = m
+			}
+		}
+		if len(mems) < 1000 {
+			break
+		}
+		after = mems[len(mems)-1].User.ID
 	}
 
 	for _, line := range lines {
@@ -370,9 +446,7 @@ func adminpointsHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			parts := strings.Split(line, "•")
 			if len(parts) >= 2 {
 				usernamePart := strings.TrimSpace(parts[0])
-				if strings.HasPrefix(usernamePart, "@") {
-					usernamePart = usernamePart[1:]
-				}
+				usernamePart = strings.TrimPrefix(usernamePart, "@")
 				// Attempt to remove prefixed numbering "1. @user"
 				if partsName := strings.SplitN(usernamePart, " ", 2); len(partsName) == 2 && strings.HasSuffix(partsName[0], ".") {
 					usernamePart = strings.TrimSpace(partsName[1])
